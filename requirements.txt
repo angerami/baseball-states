@@ -10,3 +10,5 @@ plotly
 nltk
 nox
 pytest
+accelerate>=0.26.0
+tensorboard
