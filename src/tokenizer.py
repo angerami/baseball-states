@@ -1,10 +1,11 @@
 from transformers import PreTrainedTokenizer
 import json
 import os
+from baseball_states.constants import Vocabulary
 
 class GameStateTokenizer(PreTrainedTokenizer):
     vocab_files_names = {"vocab_file": "vocab.json"}
-    
+
     def __init__(self, vocab_file=None, **kwargs):
         # If loading from file
         if vocab_file and os.path.exists(vocab_file):
@@ -12,31 +13,34 @@ class GameStateTokenizer(PreTrainedTokenizer):
                 self.token_to_id = json.load(f)
             self.id_to_token = {int(idx): token for token, idx in self.token_to_id.items()}
         else:
-            # Build vocab from scratch
-            self.special_tokens = ['<PAD>', '<START_GAME>', '<END_GAME>', 
-                                   '<START_INNING>', '<END_INNING>']
-            self.state_tokens = [f'OUT{o}_BASE{b}' for o in range(3) for b in range(8)]
-            self.outcome_tokens = ['SINGLE', 'DOUBLE', ...]
-            
-            vocab = self.special_tokens + self.state_tokens + self.outcome_tokens
+            # Build vocab from scratch using centralized Vocabulary definitions
+            vocab = Vocabulary.ALL
             self.token_to_id = {token: idx for idx, token in enumerate(vocab)}
             self.id_to_token = {idx: token for token, idx in self.token_to_id.items()}
-        
+
         super().__init__(
-            pad_token='<PAD>',
-            bos_token='<START_GAME>',
-            eos_token='<END_GAME>',
+            pad_token=Vocabulary.PAD,
+            bos_token=Vocabulary.START_GAME,
+            eos_token=Vocabulary.END_GAME,
             **kwargs
         )    
-    def _tokenize(self, text):
-        # Already tokenized, just return as-is
-        return text.split()
-    
+    def encode(self, tokens, add_special_tokens=False, **kwargs):
+        """tokens is already a list of token strings"""
+        if isinstance(tokens, str):
+            tokens = tokens.split()
+        return [self.token_to_id.get(t, self.token_to_id[Vocabulary.PAD]) for t in tokens]
+
+    def decode(self, ids, **kwargs):
+        """ids is a list of integers"""
+        if hasattr(ids, 'tolist'):
+            ids = ids.tolist()
+        return [self.id_to_token.get(i, Vocabulary.PAD) for i in ids]
+
     def _convert_token_to_id(self, token):
-        return self.token_to_id.get(token, self.token_to_id['<PAD>'])
-    
+        return self.token_to_id.get(token, self.token_to_id[Vocabulary.PAD])
+
     def _convert_id_to_token(self, index):
-        return self.id_to_token.get(index, '<PAD>')
+        return self.id_to_token.get(index, Vocabulary.PAD)
     
     def get_vocab(self):
         return self.token_to_id.copy()

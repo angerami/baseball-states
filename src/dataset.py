@@ -1,5 +1,8 @@
 import torch
 from torch.utils.data import Dataset
+from baseball_states.tokenizer import GameStateTokenizer
+from baseball_states.constants import TrainingConstants
+
 
 class GameSequenceDataset(Dataset):
     """
@@ -9,22 +12,21 @@ class GameSequenceDataset(Dataset):
         - 'sequence': List[str] - token sequences like ['<START_INNING>', '0_Empty', '1_1st', ...]
         - 'length': int - length of each sequence
 
-    This dataset converts token sequences to IDs using the tokenizer and prepares
+    This dataset prepares pre-tokenized sequences and prepares
     them for causal language modeling (next-token prediction).
     """
 
-    def __init__(self, hf_dataset, tokenizer, max_length: int = 512, pad_to_max: bool = True):
+    def __init__(self, hf_dataset, max_length: int = 32, pad_to_max: bool = True, pad_token_id = None):
         """
         Args:
             hf_dataset: HuggingFace Dataset from sequencer.py (with 'sequence' column)
-            tokenizer: GameStateTokenizer instance
             max_length: Maximum sequence length (truncate longer sequences)
             pad_to_max: If True, pad all sequences to max_length; if False, only pad to batch max
         """
         self.data = hf_dataset
-        self.tokenizer = tokenizer
         self.max_length = max_length
         self.pad_to_max = pad_to_max
+        self.pad_token_id = pad_token_id if pad_token_id is not None else GameStateTokenizer().pad_token_id
 
     def __len__(self):
         return len(self.data)
@@ -39,16 +41,8 @@ class GameSequenceDataset(Dataset):
                 - 'labels': tensor of target token IDs (shifted by 1)
                 - 'attention_mask': tensor indicating which positions are padding
         """
-        # Get token sequence (list of strings)
-        token_sequence = self.data[idx]['sequence']
-
-        # Convert list of tokens to space-separated string for tokenizer
-        # The tokenizer's _tokenize method expects a string and splits on spaces
-        token_string = ' '.join(token_sequence)
-
-        # Use the public encode method
-        ids = self.tokenizer.encode(token_string, add_special_tokens=False)
-
+        #Assume input data is pre-tokenized, no tokenizer needed
+        ids = self.data[idx]['tokens']
         # Truncate if necessary
         if len(ids) > self.max_length:
             ids = ids[:self.max_length]
@@ -66,8 +60,8 @@ class GameSequenceDataset(Dataset):
         if self.pad_to_max:
             pad_length = self.max_length - 1 - len(input_ids)  # -1 because we removed last token
             if pad_length > 0:
-                input_ids = input_ids + [self.tokenizer.pad_token_id] * pad_length
-                labels = labels + [-100] * pad_length  # -100 is ignored by CrossEntropyLoss
+                input_ids = input_ids + [self.pad_token_id] * pad_length
+                labels = labels +  [TrainingConstants.IGNORE_INDEX]* pad_length  # -100 is ignored by CrossEntropyLoss
                 attention_mask = attention_mask + [0] * pad_length
 
         return {

@@ -1,0 +1,12 @@
+pandas
+numpy
+pybaseball
+matplotlib
+datasets
+torch
+transformers
+streamlit
+plotly
+nltk
+nox
+pytest
