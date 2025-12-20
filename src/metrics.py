@@ -43,11 +43,16 @@ def compute_sequence_metrics(eval_pred):
     
     # Compute perplexity from predictions
     log_probs = predictions - np.log(np.sum(np.exp(predictions), axis=-1, keepdims=True))
-    
-    # Get log prob of true labels
+
+    # Get log prob of true labels (only for non-padding tokens)
+    # We need to mask first, then gather log probs for valid labels
     batch_size, seq_len, vocab_size = predictions.shape
-    true_log_probs = log_probs[np.arange(batch_size)[:, None], np.arange(seq_len), labels]
-    
+
+    # Create a safe copy of labels with -100 replaced by 0 (to avoid index errors)
+    # We'll only use the values where mask is True anyway
+    labels_safe = np.where(mask, labels, 0)
+    true_log_probs = log_probs[np.arange(batch_size)[:, None], np.arange(seq_len), labels_safe]
+
     # Average over non-padding tokens
     loss = -true_log_probs[mask].mean()
     perplexity = float(np.exp(loss))
