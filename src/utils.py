@@ -17,5 +17,5 @@ def get_device():
         device = torch.device("cpu")       # Default fallback
     return device
 
-def get_unique_name():
-    return f"gpt2-train-{time.strftime('%Y-%m%d-%H%M%S')}"
+def get_unique_name(run_name):
+    return f"{run_name}-{time.strftime('%Y-%m%d-%H%M%S')}"
