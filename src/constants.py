@@ -17,3 +17,14 @@ class Vocabulary:
     
 class TrainingConstants:
     IGNORE_INDEX = -100  # PyTorch CrossEntropyLoss default
+
+# In constants.py or a new rules.py
+
+def parse_state(token: str):
+    """Parse 'OUT{o}_BASE{b}' -> (outs, bases) or None for special tokens."""
+    if token.startswith('OUT') and '_BASE' in token:
+        parts = token.split('_')
+        outs = int(parts[0][3:])  # 'OUT0' -> 0
+        bases = int(parts[1][4:])  # 'BASE3' -> 3
+        return (outs, bases)
+    return None
