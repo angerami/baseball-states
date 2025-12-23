@@ -30,4 +30,4 @@ save_initial_checkpoint: true
 resume_from_checkpoint: auto  # auto = resume if checkpoint found, false = always start fresh
 
 # Other
-seed: 178
+seed: 1780
