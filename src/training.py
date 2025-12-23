@@ -286,7 +286,6 @@ def create_model(tokenizer: GameStateTokenizer, config: ModelConfig, device=None
         bos_token_id=tokenizer.bos_token_id,
         eos_token_id=tokenizer.eos_token_id,
         pad_token_id=tokenizer.pad_token_id,
-        loss_type="ForCausalLMLoss"
     )
 
     model = GPT2LMHeadModel(model_config).to(device)
