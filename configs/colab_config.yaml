@@ -3,13 +3,13 @@
 
 # Model architecture - slightly larger than base
 n_embd: 64
-n_layer: 6
-n_head: 4
+n_layer: 8
+n_head: 8
 n_positions: 32
 
 # Training - adjusted for Colab GPU memory
-batch_size: 64
-num_epochs: 1
+batch_size: 512
+num_epochs: 10
 learning_rate: 0.0005
 warmup_steps: 10
 weight_decay: 0.01
@@ -30,4 +30,4 @@ save_initial_checkpoint: true
 resume_from_checkpoint: auto  # auto = resume if checkpoint found, false = always start fresh
 
 # Other
-seed: 42
+seed: 178
