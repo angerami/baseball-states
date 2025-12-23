@@ -9,7 +9,8 @@ KEEP_COLUMNS = [
     'outs_when_up', 'on_1b', 'on_2b', 'on_3b',
     'events',
     'batter', 'pitcher',
-    'inning', 'inning_topbot'
+    'inning', 'inning_topbot',
+    'game_year', 'game_type'  # For filtering rules
 ]
 CACHE_DIR = Path("data/cache")
 OUTPUT_DIR = Path("data/pitches")

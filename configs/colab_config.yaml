@@ -1,0 +1,33 @@
+# Configuration optimized for Google Colab training
+# Override data_path and output_dir at runtime for specific runs
+
+# Model architecture - slightly larger than base
+n_embd: 64
+n_layer: 6
+n_head: 4
+n_positions: 32
+
+# Training - adjusted for Colab GPU memory
+batch_size: 64
+num_epochs: 1
+learning_rate: 0.0005
+warmup_steps: 10
+weight_decay: 0.01
+
+# Data
+data_path: data/tokens_inning  # Override with full path in notebook
+val_split: 0.1
+max_length: 32
+train_fraction: 1.0
+use_packing: false
+
+# Checkpointing
+output_dir: checkpoints  # Override with full path in notebook
+save_steps: 500
+eval_steps: 100
+logging_steps: 10
+save_initial_checkpoint: true
+resume_from_checkpoint: auto  # auto = resume if checkpoint found, false = always start fresh
+
+# Other
+seed: 42

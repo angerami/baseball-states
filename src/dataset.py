@@ -121,3 +121,44 @@ def collate_fn(batch, pad_token_id: int):
         'labels': torch.stack(labels),
         'attention_mask': torch.stack(attention_mask)
     }
+
+from dataclasses import dataclass
+from typing import Any
+
+@dataclass
+class PackingCollator:
+    tokenizer: Any
+    max_length: int = 512
+
+    def __call__(self, examples):
+        # Concatenate all sequences (convert tensors to lists)
+        all_ids = []
+        for ex in examples:
+            # Handle both tensor and list inputs
+            ids = ex["input_ids"]
+            if torch.is_tensor(ids):
+                ids = ids.tolist()
+            all_ids.extend(ids)
+
+        # Chunk into max_length pieces
+        chunks = []
+        for i in range(0, len(all_ids), self.max_length):
+            chunk = all_ids[i:i + self.max_length]
+            chunks.append(chunk)
+
+        # Pad last chunk if needed
+        if len(chunks[-1]) < self.max_length:
+            pad_len = self.max_length - len(chunks[-1])
+            chunks[-1] = chunks[-1] + [self.tokenizer.pad_token_id] * pad_len
+
+        input_ids = torch.tensor(chunks, dtype=torch.long)
+        attention_mask = self._build_attention_mask(input_ids)
+        labels = input_ids.clone()
+        labels[input_ids == self.tokenizer.pad_token_id] = -100
+
+        return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+
+    def _build_attention_mask(self, input_ids):
+        # Build 2D attention mask: 1 for real tokens, 0 for padding
+        attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
+        return attention_mask
