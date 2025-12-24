@@ -29,5 +29,9 @@ logging_steps: 10
 save_initial_checkpoint: true
 resume_from_checkpoint: auto  # auto = resume if checkpoint found, false = always start fresh
 
+# Postprocessing
+run_postanalysis: true  # Run n-gram analysis after training completes
+postanalysis_max_n: 6   # Maximum n-gram order for entropy analysis
+
 # Other
 seed: 1780

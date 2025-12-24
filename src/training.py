@@ -12,7 +12,15 @@ import yaml
 
 from baseball_states.tokenizer import GameStateTokenizer
 from baseball_states.dataset import GameSequenceDataset, PackingCollator, collate_fn
-from baseball_states.metrics import compute_sequence_metrics
+from baseball_states.metrics import (
+    compute_sequence_metrics,
+    compute_ngram_counts,
+    compute_joint_distribution_from_data,
+    compute_joint_distribution_from_model,
+    compute_js_divergence,
+    compute_conditional_divergence,
+    compute_conditional_entropies,
+)
 from baseball_states.utils import get_device, get_unique_name
 from functools import partial
 
@@ -122,6 +130,11 @@ class ModelConfig:
                                   - False/None: Start training from scratch
                                   - str: Path to specific checkpoint directory
 
+        Postprocessing:
+            run_postanalysis: If True, run n-gram analysis after training completes
+                             Results saved to parallel analysis_output directory (default: False)
+            postanalysis_max_n: Maximum n-gram order for analysis (default: 6)
+
         Other:
             seed: Random seed for reproducibility
     """
@@ -152,6 +165,10 @@ class ModelConfig:
     logging_steps: int = 10
     save_initial_checkpoint: bool = True
     resume_from_checkpoint: str | bool | None = "auto"  # "auto", True, False, or path to checkpoint
+
+    # Postprocessing
+    run_postanalysis: bool = False
+    postanalysis_max_n: int = 6
 
     # Other
     seed: int = 42
@@ -395,6 +412,182 @@ def create_trainer(model, tokenizer, train_dataset, eval_dataset, config: ModelC
     return trainer
 
 
+def run_postprocessing_analysis(model, tokenizer, config: ModelConfig, device=None):
+    """Run n-gram analysis on trained model and save results
+
+    Args:
+        model: Trained model
+        tokenizer: Tokenizer
+        config: ModelConfig with data and output paths
+        device: Device to run analysis on (default: auto-detect)
+    """
+    if device is None:
+        device = get_device()
+
+    print("\n" + "="*60)
+    print("Running post-training n-gram analysis...")
+    print("="*60 + "\n")
+
+    # Determine output directory (parallel to output_dir)
+    output_path = Path(config.output_dir)
+    analysis_dir = output_path.parent / f"analysis_{output_path.name}"
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Analysis output directory: {analysis_dir}")
+
+    # Load training data sequences
+    from datasets import load_from_disk
+    print(f"Loading dataset from {config.data_path}...")
+    dataset = load_from_disk(config.data_path)
+
+    # Get sequences - handle both Dataset and DatasetDict
+    # Try different column names: tokens, input_ids, token_ids
+    sequences = None
+
+    if hasattr(dataset, 'keys') and 'train' in dataset:
+        # It's a DatasetDict
+        ds = dataset['train']
+    else:
+        # It's a Dataset
+        ds = dataset
+
+    # Try different column names
+    for col_name in ['tokens', 'input_ids', 'token_ids']:
+        if col_name in ds.column_names:
+            sequences = ds[col_name]
+            print(f"Using column: {col_name}")
+            break
+
+    if sequences is None:
+        print(f"Warning: Could not find sequence column. Available columns: {ds.column_names}")
+        print("Skipping analysis")
+        return
+
+    print(f"Loaded {len(sequences)} sequences")
+    vocab_size = tokenizer.vocab_size
+
+    # Compute basic divergence metrics
+    print("\nComputing divergence metrics...")
+
+    # M1: Unigram divergence
+    print("  Computing unigram distributions...")
+    p_data_unigram = compute_joint_distribution_from_data(sequences, n=1, vocab_size=vocab_size)
+    p_model_unigram = compute_joint_distribution_from_model(model, tokenizer, n=1, device=device)
+    js_unigram = compute_js_divergence(p_data_unigram, p_model_unigram)
+    print(f"    JS divergence (unigram): {js_unigram:.6f}")
+
+    # M2: Bigram divergence
+    print("  Computing bigram distributions...")
+    p_data_bigram = compute_joint_distribution_from_data(sequences, n=2, vocab_size=vocab_size)
+    p_model_bigram = compute_joint_distribution_from_model(model, tokenizer, n=2, device=device)
+    js_bigram = compute_js_divergence(p_data_bigram, p_model_bigram)
+    print(f"    JS divergence (bigram): {js_bigram:.6f}")
+
+    # M2: Trigram divergence
+    print("  Computing trigram distributions...")
+    p_data_trigram = compute_joint_distribution_from_data(sequences, n=3, vocab_size=vocab_size)
+    p_model_trigram = compute_joint_distribution_from_model(model, tokenizer, n=3, device=device)
+    js_trigram = compute_js_divergence(p_data_trigram, p_model_trigram)
+    print(f"    JS divergence (trigram): {js_trigram:.6f}")
+
+    # M3: Conditional divergence
+    print("  Computing conditional divergence...")
+    m3_results = compute_conditional_divergence(
+        sequences,
+        model=model,
+        tokenizer=tokenizer,
+        n=3,
+        device=device
+    )
+    weighted_kl = m3_results['weighted_avg']
+    print(f"    Weighted KL (trigram): {weighted_kl:.6f}")
+
+    # Conditional entropies
+    print(f"\nComputing conditional entropies (n=1 to {config.postanalysis_max_n})...")
+    entropies = compute_conditional_entropies(sequences, vocab_size=vocab_size, max_n=config.postanalysis_max_n)
+    for i, H in enumerate(entropies, 1):
+        print(f"  H[X_{i} | X_1...X_{i-1}] = {H:.4f} bits")
+
+    # Save metadata as JSON
+    print("\nSaving analysis results...")
+    metadata = {
+        "model_path": str(config.output_dir),
+        "dataset_path": str(config.data_path),
+        "vocab_size": vocab_size,
+        "num_sequences": len(sequences),
+        "max_n": config.postanalysis_max_n,
+        "metrics": {
+            "js_unigram": float(js_unigram),
+            "js_bigram": float(js_bigram),
+            "js_trigram": float(js_trigram),
+            "weighted_kl_trigram": float(weighted_kl),
+        },
+        "entropies": [float(h) for h in entropies],
+    }
+
+    metadata_file = analysis_dir / "analysis_metadata.json"
+    with open(metadata_file, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    print(f"  Saved metadata to {metadata_file}")
+
+    # Save metrics summary
+    metrics_file = analysis_dir / "metrics.txt"
+    with open(metrics_file, 'w') as f:
+        f.write("N-gram Analysis Metrics\n")
+        f.write("=" * 60 + "\n\n")
+        f.write(f"Model: {config.output_dir}\n")
+        f.write(f"Dataset: {config.data_path}\n")
+        f.write(f"Vocabulary size: {vocab_size}\n")
+        f.write(f"Number of sequences: {len(sequences)}\n\n")
+        f.write("Divergence Metrics:\n")
+        f.write(f"  JS divergence (unigram):  {js_unigram:.6f}\n")
+        f.write(f"  JS divergence (bigram):   {js_bigram:.6f}\n")
+        f.write(f"  JS divergence (trigram):  {js_trigram:.6f}\n")
+        f.write(f"  Weighted KL (trigram):    {weighted_kl:.6f}\n\n")
+        f.write("Conditional Entropies:\n")
+        for i, H in enumerate(entropies, 1):
+            f.write(f"  H[X_{i} | X_1...X_{i-1}] = {H:.4f} bits\n")
+    print(f"  Saved metrics to {metrics_file}")
+
+    # Save numpy arrays for dashboard
+    arrays_file = analysis_dir / "analysis_arrays.npz"
+
+    # Compute conditional probabilities for dashboard
+    from baseball_states.metrics import get_model_conditional_probs, counts_to_conditional_prob
+    bigram_counts = compute_ngram_counts(sequences, n=2)
+    p_data_bigram_cond = counts_to_conditional_prob(bigram_counts, n=2, vocab_size=vocab_size)
+    p_model_bigram_cond = get_model_conditional_probs(model, tokenizer, n=2, device=device)
+
+    # Flatten trigram conditionals for heatmaps
+    from baseball_states.utils import flatten_conditional_for_heatmap
+    p_data_flat = flatten_conditional_for_heatmap(m3_results["p_data"])
+    p_model_flat = flatten_conditional_for_heatmap(m3_results["p_model"])
+
+    np.savez_compressed(
+        arrays_file,
+        p_data_unigram=p_data_unigram,
+        p_model_unigram=p_model_unigram,
+        p_data_bigram=p_data_bigram,
+        p_model_bigram=p_model_bigram,
+        p_data_bigram_cond=p_data_bigram_cond,
+        p_model_bigram_cond=p_model_bigram_cond,
+        p_data_trigram=p_data_trigram,
+        p_model_trigram=p_model_trigram,
+        m3_p_data=m3_results["p_data"],
+        m3_p_model=m3_results["p_model"],
+        m3_per_history=m3_results["per_history"],
+        m3_history_freq=m3_results["history_freq"],
+        p_data_flat=p_data_flat,
+        p_model_flat=p_model_flat,
+    )
+    print(f"  Saved arrays to {arrays_file}")
+
+    print("\n" + "="*60)
+    print("Post-training analysis complete!")
+    print(f"Results saved to: {analysis_dir}")
+    print("="*60 + "\n")
+
+
 def train_model(config: ModelConfig):
     """Main training function
 
@@ -470,5 +663,13 @@ def train_model(config: ModelConfig):
     print(f"Final eval loss: {eval_results['eval_loss']:.4f}")
     print(f"Final perplexity: {np.exp(eval_results['eval_loss']):.4f}")
     print(f"Final accuracy: {eval_results['eval_accuracy']:.4f}")
+
+    # Run postprocessing analysis if enabled
+    if config.run_postanalysis:
+        try:
+            run_postprocessing_analysis(model, tokenizer, config, device)
+        except Exception as e:
+            print(f"\nWarning: Postprocessing analysis failed with error: {e}")
+            print("Training completed successfully, but analysis could not be completed.")
 
     return model, tokenizer
